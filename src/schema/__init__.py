@@ -1,6 +1,6 @@
 from .vendor_category import VendorCategory, VendorCreate, VendorUpdate, VendorResponse, VendorListResponse
 from .vendor_metric import VendorMetricCreate, VendorMetricResponse
-from .vendor_score import VendorScoreResponse
+from .vendor_score import VendorScoreResponse, VendorScoreRecomputeSummary
 
 __all__ = [
     "VendorCategory",
@@ -11,4 +11,5 @@ __all__ = [
     "VendorMetricCreate",
     "VendorMetricResponse",
     "VendorScoreResponse",
+    "VendorScoreRecomputeSummary",
 ]

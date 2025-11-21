@@ -24,7 +24,7 @@ from src.services import (
     recompute_latest_score,
 )
 
-from utils.validate_vendor import load_vendor, vendor_to_response
+from src.utils.validate_vendor import load_vendor, vendor_to_response
 
 
 router = APIRouter(prefix="/vendors", tags=["vendors"])

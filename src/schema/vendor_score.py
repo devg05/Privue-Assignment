@@ -15,3 +15,9 @@ class VendorScoreResponse(BaseModel):
     score: float = Field(..., ge=0, le=100)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class VendorScoreRecomputeSummary(BaseModel):
+    """Summary payload for bulk recomputation requests."""
+
+    processed_vendors: int = Field(..., ge=0)
