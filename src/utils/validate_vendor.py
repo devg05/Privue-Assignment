@@ -4,13 +4,15 @@ from fastapi import HTTPException
 
 from src.models import VendorModel, VendorScoreModel
 from src.schema import VendorResponse
-from src.services import load_vendor
 
 
 def load_vendor(session: Session, vendor_id: UUID) -> VendorModel:
-    vendor = load_vendor(session, vendor_id)
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+    vendor = session.get(VendorModel, vendor_id)
+    if vendor is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Vendor not found"
+        )
     return vendor
 
 
