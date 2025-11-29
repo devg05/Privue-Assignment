@@ -1,391 +1,166 @@
-# Privue — SDE 1 Software Engineer (Python Backend)
-## Take-Home Assignment: Vendor Score Microservice
+# Privue — Vendor Score Microservice
+
+This repository implements a small FastAPI microservice that:
+
+- Registers vendors
+- Stores vendor performance metrics
+- Computes and snapshots vendor scores (0–100)
+- Exposes endpoints to retrieve vendor details and score history
+- Provides an admin endpoint and options for daily score recomputation
+
+
+## Base URL
 
-This assignment evaluates practical backend engineering skills: API design, database modeling, validation, scoring logic, testing, deployment, and reasoning.  
-No domain expertise is required.
+Replace the placeholder below with your deployed base URL (required for submission):
 
----
+BASE_URL=http://13.204.62.20:8000
 
-# 1. Overview
 
-You will build a small backend microservice that:
+## Quick curl examples
+Replace `{BASE}` with your base URL and `<vendor_id>` with an actual UUID returned from the create vendor call.
 
-- Registers **vendors**
-- Accepts **performance metrics** for each vendor
-- Computes a **numeric score** (0–100) for each vendor
-- Exposes APIs to retrieve vendor details and score history
-- Recomputes scores **periodically** (daily or using any scheduling method you choose)
-- Is **deployed online** so it can be tested via HTTP  
-  **Local execution of your code will NOT be performed**
+- Create vendor
+	```sh
+	curl -X POST "{BASE}/vendors" \
+		-H "Content-Type: application/json" \
+		-d '{"name":"Acme","category":"supplier"}'
+	```
 
-This assignment is intentionally small but covers real backend engineering.
+- Submit a metric
+	```sh
+	curl -X POST "{BASE}/vendors/<vendor_id>/metrics" \
+		-H "Content-Type: application/json" \
+		-d '{
+			"timestamp":"2025-11-29T12:00:00+00:00",
+			"on_time_delivery_rate":95.0,
+			"complaint_count":0,
+			"missing_documents":false,
+			"compliance_score":98.0
+		}'
+	```
 
----
+- Get vendor detail (includes latest score)
+	```sh
+	curl "{BASE}/vendors/<vendor_id>"
+	```
+
+- Get vendor scores (paginated)
+	```sh
+	curl "{BASE}/vendors/<vendor_id>/scores?limit=10&offset=0"
+	```
 
-# 2. Deployment Requirement (Mandatory)
+- Health
+	```sh
+	curl "{BASE}/health"
+	```
 
-Your service **must** be deployed to a publicly accessible environment.
+- Admin: recompute single vendor
+	```sh
+	curl -X POST "{BASE}/admin/vendors/<vendor_id>/scores/recompute"
+	```
 
-Acceptable hosts include (but are not limited to):
+- Admin: recompute all vendors
+	```sh
+	curl -X POST "{BASE}/admin/vendors/scores/recompute"
+	```
 
-- Render  
-- Railway  
-- Fly.io  
-- AWS / GCP / Azure  
-- Any equivalent platform
 
-Your README must include:
+## Data model (summary)
 
-- **Base URL** (e.g. `https://your-app.onrender.com`)
-- **Working curl commands** for all required endpoints
+- `vendors` (`VendorModel`)
+	- `id` (UUID, PK)
+	- `name` (string)
+	- `category` (enum: `supplier`, `distributor`, `dealer`, `manufacturer`)
+	- `created_at`, `updated_at` (timezone-aware datetimes)
 
-If there is **no working deployment**, the submission is considered **incomplete**.
+- `vendor_metrics` (`VendorMetricModel`)
+	- `id` (UUID, PK)
+	- `vendor_id` (FK -> `vendors.id`)
+	- `timestamp` (when the metric applies)
+	- `on_time_delivery_rate` (float 0–100)
+	- `complaint_count` (int)
+	- `missing_documents` (bool)
+	- `compliance_score` (float 0–100)
+	- `raw_payload` (JSON, optional)
 
----
+- `vendor_scores` (`VendorScoreModel`)
+	- `id` (UUID, PK)
+	- `vendor_id` (FK -> `vendors.id`)
+	- `calculated_at` (when score was recorded)
+	- `score` (float 0–100)
 
-# 3. Technology Requirements
 
-You must use:
+## Scoring logic (deterministic)
 
-- **Python 3.12+**
-- **FastAPI**
-- **PostgreSQL**
-- **SQLAlchemy or SQLModel**
-- **Alembic (or similar)** for migrations
-- **pytest** (or equivalent) for automated tests
+Implemented in `src/services/scoring_service.py`. For a single metric the score is computed as:
 
-Additional libraries are allowed but must be documented.
+- delivery_component = `on_time_delivery_rate * 0.45`
+- compliance_component = `compliance_score * 0.4`
+- reliability_component = `max(0, 15 - complaint_penalty)`, where `complaint_penalty = min(complaint_count * 1.25, 25)`
+- penalty_component = `10` if `missing_documents` is true, else `0`
+- raw_score = delivery_component + compliance_component + reliability_component - penalty_component
+- final_score = clamp(raw_score * category_weight, 0, 100)
 
----
+Category weights (in code):
+- `supplier`: 1.0
+- `distributor`: 0.95
+- `dealer`: 0.9
+- `manufacturer`: 1.05
 
-# 4. Functional Requirements
 
-Your service must support the following:
+## Recompute / Scheduling
 
----
+Supported approaches:
 
-## 4.1 Create Vendor  
-`POST /vendors`  
-Register a new vendor with basic details like name and category.
+- **Admin endpoint (implemented)** — `GET /admin/vendors/scores/recompute` (bulk) and `GET /admin/vendors/{vendor_id}/scores/recompute` (single). Intended for scheduled or manual invocation.
 
----
+- **AWS EventBridge + Lambda (used in this deployment)** — Created a small Lambda function that can perform an authenticated GET to the admin recompute endpoint, then added an EventBridge scheduled rule to invoke that Lambda daily. 
 
-## 4.2 Ingest Vendor Metrics  
-`POST /vendors/{vendor_id}/metrics`
 
-Accept a JSON payload containing vendor performance metrics.  
-Validation is required.
+## Running locally
 
-Example fields:
+1. Create virtualenv and install deps:
+```sh
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-- `on_time_delivery_rate` (0–100)
-- `complaint_count` (integer)
-- `missing_documents` (boolean or integer)
-- `compliance_score` (0–100)
-- `timestamp` (ISO datetime, representing when the metric applies)
+2. Provide `.env` (or env vars):
+```ini
+DATABASE_URL=postgresql://user:pass@localhost:5432/dbname
+DATABASE_ECHO=false
+ADMIN_API_KEY=replace_me
+```
 
-Your service must:
+3. Run migrations:
+```sh
+export PYTHONPATH=$(pwd)
+alembic upgrade head
+```
 
-- Validate the payload
-- Reject invalid data with clear 4xx error messages
-- Handle multiple submissions (including out-of-order timestamps)
+4. Start the app (dev):
+```sh
+uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+```
 
----
 
-## 4.3 Get Vendor Details (with Latest Score)  
-`GET /vendors/{vendor_id}`
+## Tests
 
-Returns vendor info and the **latest computed score**  
-(or a clear indication if no score exists yet).
+- Run unit and integration tests with pytest:
+```sh
+python -m pytest
+```
 
----
+Tests are in `tests/`.
 
-## 4.4 Get Vendor Score History  
-`GET /vendors/{vendor_id}/scores?limit=&offset=`
 
-Paginated or simple limit/offset parameters are acceptable.
+## Future improvements
 
----
+- **Protect admin endpoints with an API key**
 
-## 4.5 Health Check  
-`GET /health`  
-Returns a simple success response.
+- **Use JWT (Bearer) tokens for user/role-based access**
 
----
+- **Operational improvements**
+	- Use an external scheduler (cloud scheduler or cron) to trigger daily recomputes for higher reliability. Add retries and alerts on failure. Consider running recompute as a background job (Celery/RQ) for better scalability.
 
-# 5. Data Model Requirements
-
-Your database must contain at least the following tables:
-
----
-
-## 5.1 Vendor
-
-Fields:
-
-- `id`
-- `name`
-- `category` (string or enum: e.g. supplier, distributor, dealer)
-- `created_at`
-- `updated_at`
-
----
-
-## 5.2 VendorMetric
-
-Each metric submission must be stored.
-
-Fields:
-
-- `id`
-- `vendor_id` (FK → Vendor)
-- `timestamp` (represents when the metrics apply)
-- `on_time_delivery_rate`
-- `complaint_count`
-- `missing_documents`
-- `compliance_score`
-- (optional) `raw_payload` JSON for storing original input
-
----
-
-## 5.3 VendorScore
-
-Stores computed score snapshots.
-
-Fields:
-
-- `id`
-- `vendor_id` (FK)
-- `calculated_at`
-- `score` (0–100)
-
----
-
-# 6. Scoring Logic Requirements
-
-You must implement a **deterministic** function producing a score between **0 and 100**.
-
-### The formula must consider:
-
-- Higher `on_time_delivery_rate` → higher score
-- Higher `complaint_count` → lower score
-- `missing_documents = true` → penalty
-- Higher `compliance_score` → higher score
-- Vendor `category` influences scoring weight in some meaningful way
-
-### Requirements:
-
-- Clamp final score to **[0, 100]**
-- Handle multiple metrics intelligently (e.g., latest by timestamp)
-- Document your scoring formula clearly in the README
-
-The exact formula is **your choice**, but it must be reasonable and explained.
-
----
-
-# 7. Score Recalculation Mechanism
-
-You must provide a mechanism to recompute scores for **all vendors**.  
-Choose any of the following:
-
-- CLI command executed via cron
-- APScheduler job
-- Celery / RQ worker task
-- Admin endpoint that triggers score recomputation
-- Any equivalent approach
-
-Your README must explain:
-
-- How your recomputation works  
-- How it *would* be scheduled daily in production  
-
----
-
-# 8. Validation & Edge Cases
-
-Your service must:
-
-- Reject invalid JSON with descriptive errors
-- Enforce constraints such as:
-  - numeric ranges (0–100)
-  - required fields
-  - correct types
-- Handle:
-  - out-of-order metric timestamps
-  - multiple metrics per vendor
-  - duplicate or near-duplicate submissions (your chosen strategy must be documented)
-
-Document your decisions in the README.
-
----
-
-# 9. Testing Requirements
-
-Automated tests are required.
-
----
-
-## 9 Unit Tests
-
-You must test:
-
-- Scoring logic  
-- Input validation logic  
-
-Use pytest or any equivalent test framework.
-
----
-
-# 10. Recommended Implementation Steps
-
-This section is a suggested workflow to help approach your solution.
-
----
-
-## Step 1 — Project Setup
-
-- Set up FastAPI
-- Add `/health` endpoint
-- Prepare dependencies (`requirements.txt` or `pyproject.toml`)
-
----
-
-## Step 2 — Database Schema
-
-- Define models for Vendor, VendorMetric, VendorScore  
-- Create migrations using Alembic
-
----
-
-## Step 3 — Core API Endpoints
-
-Implement:
-
-- `POST /vendors`
-- `POST /vendors/{vendor_id}/metrics`
-- `GET /vendors/{vendor_id}`
-- `GET /vendors/{vendor_id}/scores`
-
-Ensure validation and error handling is solid.
-
----
-
-## Step 4 — Scoring Logic
-
-- Write a clear scoring function
-- Document the formula in README
-
----
-
-## Step 5 — Score Recalculation
-
-Implement a recomputation mechanism: cron, scheduler, worker, or admin endpoint.
-
-Document:
-
-- How it works
-- How it is intended to run daily
-
----
-
-## Step 6 — Testing
-
-Write:
-
-- Unit tests for scoring + validation  
-- Integration test for basic workflow  
-
----
-
-## Step 7 — Deployment
-
-Deploy publicly to any provider.
-
-Your service must be reachable at the given URL.
-
----
-
-## Step 8 — Final Polish
-
-- Clean project structure (routers, schemas, services, db modules)
-- Add logging where appropriate
-- Improve error messaging
-- Finalize README describing your decisions
-
----
-
-# 11. Deliverables
-
-Your submission must include:
-
-1. **A Git repository** containing:
-   - Source code
-   - Tests
-   - Database migrations
-   - Requirements/pyproject
-   - README with:
-     - Live base URL  
-     - Working curl examples  
-     - Data model explanation  
-     - Scoring logic explanation  
-     - Scheduling/recompute explanation  
-     - Notes, trade-offs, and assumptions  
-
-2. **A publicly deployed version** of the service
-
-Both are required for completion.
-
----
-
-# 12. Evaluation Criteria
-
-Your solution will be assessed on:
-
----
-
-## Correctness
-- APIs behave as expected  
-- End-to-end flow works on deployed service  
-
----
-
-## Code Quality
-- Clean structure  
-- Good naming  
-- Clear separation of layers  
-
----
-
-## Database Design
-- Appropriate types  
-- Foreign keys  
-- Migrations  
-
----
-
-## Scoring Logic
-- Clear reasoning  
-- Deterministic and consistent  
-- Well-documented formula  
-
----
-
-## Testing Quality
-- Meaningful coverage  
-- Tests are readable and maintainable  
-
----
-
-## Deployment
-- Public URL  
-- Curl commands work as provided  
-
----
-
-## Documentation
-- Clear explanations in README  
-- Logical decisions and reasoning  
-
----
-
-**Good luck — we look forward to reviewing your submission.**

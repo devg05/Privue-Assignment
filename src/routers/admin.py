@@ -15,7 +15,7 @@ from src.utils.validate_vendor import load_vendor, vendor_to_response
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-@router.post("/vendors/{vendor_id}/scores/recompute", response_model=VendorResponse)
+@router.get("/vendors/{vendor_id}/scores/recompute", response_model=VendorResponse)
 def admin_recompute_vendor_score(
     vendor_id: UUID,
     session: Session = Depends(get_db),
@@ -36,7 +36,7 @@ def admin_recompute_vendor_score(
     return vendor_to_response(vendor, snapshot)
 
 
-@router.post("/vendors/scores/recompute", response_model=VendorScoreRecomputeSummary)
+@router.get("/vendors/scores/recompute", response_model=VendorScoreRecomputeSummary)
 def admin_recompute_all_vendor_scores(
     session: Session = Depends(get_db),
 ) -> VendorScoreRecomputeSummary:
