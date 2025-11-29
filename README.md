@@ -11,9 +11,9 @@ This repository implements a small FastAPI microservice that:
 
 ## Base URL
 
-Replace the placeholder below with your deployed base URL (required for submission):
+Replace the placeholder below with your deployed Base URL:
 
-BASE_URL=http://13.204.62.20:8000
+Current BASE_URL=http://13.204.62.20:8000
 
 
 ## Quick curl examples
@@ -162,5 +162,4 @@ Tests are in `tests/`.
 - **Use JWT (Bearer) tokens for user/role-based access**
 
 - **Operational improvements**
-	- Use an external scheduler (cloud scheduler or cron) to trigger daily recomputes for higher reliability. Add retries and alerts on failure. Consider running recompute as a background job (Celery/RQ) for better scalability.
-
+	- Use an external scheduler (cloud scheduler or cron) to trigger daily recomputes for higher reliability. Add retries and alerts on failure. Running recompute as a background job (Celery/RQ) for better scalability.
